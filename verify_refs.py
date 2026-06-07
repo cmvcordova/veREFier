@@ -47,6 +47,7 @@ class Ref:
     authors: List[str] = field(default_factory=list)
     year: Optional[int] = None
     doi: Optional[str] = None
+    arxiv: Optional[str] = None
 
 
 @dataclass
@@ -92,6 +93,18 @@ _FIELD = re.compile(r"(\w+)\s*=\s*[{\"](.+?)[}\"]\s*,?\s*\n?", re.DOTALL)
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
 
+_ARXIV_IN_TEXT = re.compile(r"(?:arxiv[:.]?\s*)?(\d{4}\.\d{4,5})", re.IGNORECASE)
+
+
+def extract_arxiv_id(text: str) -> Optional[str]:
+    """Find an arXiv id in free text: ``arXiv:XXXX.XXXXX``, a bare ``XXXX.XXXXX``,
+    or a ``10.48550/arXiv.XXXX.XXXXX`` DOI. Returns the bare ``XXXX.XXXXX`` or None."""
+    if not text:
+        return None
+    m = _ARXIV_IN_TEXT.search(text)
+    return m.group(1) if m else None
+
+
 def _split_authors(s: str) -> List[str]:
     return [a.strip() for a in re.split(r"\s+and\s+", s) if a.strip()]
 
@@ -101,10 +114,13 @@ def parse_bib(text: str) -> List[Ref]:
     for key, body in _BIB_ENTRY.findall(text):
         fields = {k.lower(): v.strip() for k, v in _FIELD.findall(body)}
         year = int(fields["year"]) if fields.get("year", "").strip().isdigit() else None
+        arxiv = (extract_arxiv_id(fields.get("eprint", ""))
+                 or extract_arxiv_id(fields.get("doi", ""))
+                 or extract_arxiv_id(body))
         refs.append(Ref(key=key.strip(), raw=body.strip(),
                         title=re.sub(r"[{}]", "", fields.get("title", "")),
                         authors=_split_authors(fields.get("author", "")),
-                        year=year, doi=fields.get("doi") or None))
+                        year=year, doi=fields.get("doi") or None, arxiv=arxiv))
     return refs
 
 
@@ -151,12 +167,14 @@ def parse_bibitems(text: str) -> List[Ref]:
         refs.append(Ref(key=key, raw=raw,
                         title=title,
                         authors=parse_authors_from_bibitem(raw),
-                        year=int(ym.group(0)) if ym else None, doi=None))
+                        year=int(ym.group(0)) if ym else None, doi=None,
+                        arxiv=extract_arxiv_id(raw)))
     return refs
 
 
 def parse_list(text: str) -> List[Ref]:
-    return [Ref(key=None, raw=line.strip(), title=line.strip())
+    return [Ref(key=None, raw=line.strip(), title=line.strip(),
+                arxiv=extract_arxiv_id(line))
             for line in text.splitlines() if line.strip()]
 
 
@@ -210,6 +228,24 @@ import xml.etree.ElementTree as ET
 _ARXIV_ID = re.compile(r"(\d{4}\.\d{4,5})")
 
 
+def _arxiv_entry_to_candidate(entry, ns, arxiv_id=None) -> Optional[Candidate]:
+    """Turn a single Atom <entry> into a Candidate. If ``arxiv_id`` is given it is
+    used as the identifier; otherwise it is parsed from the entry's <id>."""
+    title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip()
+    if arxiv_id is None:
+        idtext = entry.findtext("a:id", default="", namespaces=ns) or ""
+        m = _ARXIV_ID.search(idtext)
+        if not m:
+            return None
+        arxiv_id = m.group(1)
+    authors = [e.findtext("a:name", default="", namespaces=ns)
+               for e in entry.findall("a:author", ns)]
+    pub = entry.findtext("a:published", default="", namespaces=ns) or ""
+    year = int(pub[:4]) if pub[:4].isdigit() else None
+    return Candidate(title=title, authors=authors, year=year,
+                     identifier_type="arxiv", identifier=arxiv_id, source="arxiv")
+
+
 def resolve_arxiv(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
     q = urllib.parse.quote(normalize_title(ref.title or ref.raw))
     url = f"http://export.arxiv.org/api/query?search_query=ti:{q}&max_results=5"
@@ -223,17 +259,23 @@ def resolve_arxiv(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
         return None
     entry = max(entries, key=lambda e: title_similarity(
         ref.title, (e.findtext("a:title", default="", namespaces=ns) or "").strip()))
-    title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip()
-    idtext = entry.findtext("a:id", default="", namespaces=ns) or ""
-    m = _ARXIV_ID.search(idtext)
-    if not m:
+    return _arxiv_entry_to_candidate(entry, ns)
+
+
+def resolve_arxiv_by_id(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+    """Look a ref up directly via the authoritative arXiv ``id_list`` endpoint."""
+    if not ref.arxiv:
         return None
-    authors = [e.findtext("a:name", default="", namespaces=ns)
-               for e in entry.findall("a:author", ns)]
-    pub = entry.findtext("a:published", default="", namespaces=ns) or ""
-    year = int(pub[:4]) if pub[:4].isdigit() else None
-    return Candidate(title=title, authors=authors, year=year,
-                     identifier_type="arxiv", identifier=m.group(1), source="arxiv")
+    url = f"http://export.arxiv.org/api/query?id_list={urllib.parse.quote(ref.arxiv)}"
+    try:
+        root = ET.fromstring(fetch(url))
+    except Exception:
+        return None
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    entry = root.find("a:entry", ns)
+    if entry is None:
+        return None
+    return _arxiv_entry_to_candidate(entry, ns, arxiv_id=ref.arxiv)
 
 
 def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
@@ -261,17 +303,20 @@ def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
 
 
 def resolve(ref: Ref, fetch_crossref=_http_get, fetch_arxiv=_http_get,
-            fetch_openalex=_http_get) -> Optional[Candidate]:
-    for fn, fetch in ((resolve_crossref, fetch_crossref),
-                      (resolve_arxiv, fetch_arxiv),
-                      (resolve_openalex, fetch_openalex)):
+            fetch_openalex=_http_get, fetch_arxiv_id=_http_get) -> Optional[Candidate]:
+    # an explicit arXiv id stated by the ref is the strongest signal: try it first
+    chain = []
+    if ref.arxiv:
+        chain.append((resolve_arxiv_by_id, fetch_arxiv_id))
+    chain += [(resolve_crossref, fetch_crossref),
+              (resolve_arxiv, fetch_arxiv),
+              (resolve_openalex, fetch_openalex)]
+    for fn, fetch in chain:
         cand = fn(ref, fetch=fetch)
         if cand is not None and verdict(ref, cand) == VERIFIED:
             return cand
-    # return the best non-verified candidate (Crossref first) for MISMATCH reporting
-    for fn, fetch in ((resolve_crossref, fetch_crossref),
-                      (resolve_arxiv, fetch_arxiv),
-                      (resolve_openalex, fetch_openalex)):
+    # return the best non-verified candidate (id-lookup first, then Crossref) for MISMATCH reporting
+    for fn, fetch in chain:
         cand = fn(ref, fetch=fetch)
         if cand is not None:
             return cand

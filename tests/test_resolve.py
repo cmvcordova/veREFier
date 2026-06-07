@@ -53,3 +53,42 @@ def test_resolve_cascade_prefers_crossref(monkeypatch):
         fetch_arxiv=lambda u, headers=None: "<feed></feed>",
         fetch_openalex=lambda u, headers=None: '{"results":[]}')
     assert cand.source == "crossref"
+
+def test_extract_arxiv_id_forms():
+    assert vr.extract_arxiv_id("see arXiv:1802.03426 for details") == "1802.03426"
+    assert vr.extract_arxiv_id("10.48550/arXiv.2508.07119") == "2508.07119"
+    assert vr.extract_arxiv_id("no id here") is None
+
+def test_parse_bibitem_populates_arxiv_field():
+    bi = r"\bibitem{umap} L.~McInnes et al., ``UMAP,'' \emph{arXiv:1802.03426}, 2018."
+    assert vr.parse_bibitems(bi)[0].arxiv == "1802.03426"
+
+def test_resolve_arxiv_by_id_returns_candidate():
+    ref = vr.Ref(key="pythia", raw="", title="Pythia: A Suite for Analyzing Large Language Models Across Training and Scaling",
+                 authors=["Biderman"], year=2023, arxiv="2304.01373")
+    cand = vr.resolve_arxiv_by_id(ref, fetch=_stub(FIX / "arxiv_id_pythia.xml"))
+    assert cand is not None and cand.identifier_type == "arxiv" and cand.identifier == "2304.01373"
+    assert cand.year == 2023 and any("Biderman" in a for a in cand.authors)
+
+def test_resolve_arxiv_by_id_none_when_no_id():
+    ref = vr.Ref(key="x", raw="", title="t", arxiv=None)
+    assert vr.resolve_arxiv_by_id(ref, fetch=lambda u, headers=None: "<feed></feed>") is None
+
+def test_cascade_uses_arxiv_id_first_and_verifies():
+    ref = vr.Ref(key="pythia", raw="", title="Pythia: A Suite for Analyzing Large Language Models Across Training and Scaling",
+                 authors=["Biderman"], year=2023, arxiv="2304.01373")
+    cand = vr.resolve(ref,
+        fetch_arxiv_id=_stub(FIX / "arxiv_id_pythia.xml"),
+        fetch_crossref=lambda u, headers=None: '{"message":{"items":[]}}',
+        fetch_arxiv=lambda u, headers=None: "<feed></feed>",
+        fetch_openalex=lambda u, headers=None: '{"results":[]}')
+    assert cand.source == "arxiv" and cand.identifier == "2304.01373"
+    assert vr.verdict(ref, cand) == vr.VERIFIED
+
+def test_cascade_arxiv_id_wrong_id_is_caught():
+    # anti-hallucination: a human-supplied id that resolves to a DIFFERENT paper must NOT verify
+    ref = vr.Ref(key="pythia", raw="", title="Pythia: A Suite for Analyzing Large Language Models",
+                 authors=["Biderman"], year=2023, arxiv="1234.56789")
+    wrong = "<feed xmlns='http://www.w3.org/2005/Atom'><entry><id>http://arxiv.org/abs/1234.56789</id><title>Some Unrelated Paper About Cats</title><author><name>Nobody</name></author><published>2012-01-01T00:00:00Z</published></entry></feed>"
+    cand = vr.resolve_arxiv_by_id(ref, fetch=lambda u, headers=None: wrong)
+    assert vr.verdict(ref, cand) == vr.MISMATCH

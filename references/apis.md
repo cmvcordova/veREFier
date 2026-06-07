@@ -10,6 +10,13 @@ Fields used: message.items[0].DOI, .title[0], .author[].family, .issued.date-par
 GET http://export.arxiv.org/api/query?search_query=ti:<title>&max_results=5
 Atom XML. Fields: entry/title, entry/id (-> 1234.56789), entry/author/name, entry/published
 
+## arXiv by id (authoritative, tried FIRST when a ref states an id)
+GET http://export.arxiv.org/api/query?id_list=<XXXX.XXXXX>
+Same Atom XML shape, one entry. Used when the ref already states an arXiv id in its
+text (`arXiv:1802.03426`), BibTeX `eprint`, or a `10.48550/arXiv.XXXX.XXXXX` DOI
+(see extract_arxiv_id). The match gate still runs on the returned record, so a
+mis-typed id resolves to a non-matching title -> MISMATCH (anti-hallucination safe).
+
 ## OpenAlex (catch-all)
 GET https://api.openalex.org/works?search=<ref>&per-page=5
 Fields: results[0].display_name, .publication_year, .doi, .ids.openalex, .authorships[].author.display_name
