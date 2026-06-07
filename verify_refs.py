@@ -75,7 +75,8 @@ def verdict(ref: Ref, cand: Optional[Candidate]) -> str:
     if cand is None:
         return NOT_FOUND
     title_ok = title_similarity(ref.title, cand.title) >= TITLE_THRESHOLD
-    if title_ok and _author_overlap(ref.authors, cand.authors) and _year_ok(ref.year, cand.year):
+    author_ok = (not ref.authors) or _author_overlap(ref.authors, cand.authors)
+    if title_ok and author_ok and _year_ok(ref.year, cand.year):
         return VERIFIED
     return MISMATCH
 

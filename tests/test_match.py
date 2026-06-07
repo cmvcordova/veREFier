@@ -62,3 +62,14 @@ def test_verdict_mismatch_on_wrong_title_same_doi():
     ref = _ref(title="Attention is all you need", authors=["Vaswani"], year=2017)
     cand = _cand(title="Diffusion maps", authors=["Vaswani"], year=2017)
     assert vr.verdict(ref, cand) == vr.MISMATCH
+
+def test_verdict_verified_title_only_when_ref_has_no_authors():
+    ref = _ref(title="Visualizing Data using t-SNE", authors=[], year=None)
+    cand = _cand(title="Visualizing Data using t-SNE",
+                 authors=["van der Maaten", "Hinton"], year=2008)
+    assert vr.verdict(ref, cand) == vr.VERIFIED
+
+def test_verdict_still_mismatch_when_ref_authors_present_and_wrong():
+    ref = _ref(title="Diffusion maps", authors=["Nobody"], year=2006)
+    cand = _cand(title="Diffusion maps", authors=["Coifman", "Lafon"], year=2006)
+    assert vr.verdict(ref, cand) == vr.MISMATCH
