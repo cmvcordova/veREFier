@@ -19,7 +19,14 @@ mis-typed id resolves to a non-matching title -> MISMATCH (anti-hallucination sa
 
 ## OpenAlex (catch-all)
 GET https://api.openalex.org/works?search=<ref>&per-page=5
-Fields: results[0].display_name, .publication_year, .doi, .ids.openalex, .authorships[].author.display_name
+Fields: results[0].display_name, .publication_year, .doi, .ids.openalex,
+.primary_location.landing_page_url, .authorships[].author.display_name
+
+When the best-matching record has `doi: null`, the resolver emits a `url`-tier identifier
+(the weakest verification tier): `primary_location.landing_page_url` if present, else the
+`.ids.openalex` landing URL (`https://openalex.org/W...`). This is the gated fallback for
+genuinely DOI-less works — the URL is a field of a MATCHED record, never fabricated, and a
+non-matching ref stays `NOT_FOUND`.
 
 ## Rate-limit etiquette
 Polite-pool User-Agent; exponential backoff on 429/503; cap retries then report NOT_FOUND

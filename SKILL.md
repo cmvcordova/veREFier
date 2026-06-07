@@ -17,7 +17,7 @@ Run:
     python verify_refs.py path/to/refs.bib --out-bib verified.bib --report report.md
 
 - Auto-detects `.bib`, `\bibitem` blocks, or a plain title-per-line list (override with `--format`).
-- `verified.bib` contains ONLY `VERIFIED` entries, each with `doi =` or `eprint =`.
+- `verified.bib` contains ONLY `VERIFIED` entries, each with `doi =`, `eprint =`, or (url tier) `url =`.
 - `report.md` lists every ref's verdict: `VERIFIED` / `MISMATCH` / `NOT_FOUND`.
 - Exit code is nonzero if any ref is not `VERIFIED` — usable as a CI/pre-commit gate.
 
@@ -34,6 +34,26 @@ Then:
 - `NOT_FOUND` -> no authoritative record. Do not invent one. Tell the user it could not be verified.
 
 Never silently emit a `MISMATCH` or `NOT_FOUND`.
+
+## Verification strength & the URL fallback
+
+Every `VERIFIED` ref carries a strength tier, surfaced in the report as `[doi]`/`[arxiv]`/`[url]`:
+`doi` (strongest) > `arxiv` > `url` (weakest). The summary line counts each tier, e.g.
+`VERIFIED 20 (doi 15 / arxiv 3 / url 2) | MISMATCH 2 | NOT_FOUND 0`.
+
+Some legitimate works genuinely have no DOI or arXiv id (pre-DOI papers: t-SNE/JMLR 2008,
+Levina–Bickel/NeurIPS 2004). For these the tool falls back to a stable `url`, but ONLY under a gate:
+
+- The URL is emitted ONLY when an authority returns a record that MATCHES the ref
+  (title + author + year, the usual gate) AND that record's own DOI field is null/absent.
+  The authority itself is asserting "this work has no DOI"; the tool then emits that record's
+  stable URL (`primary_location.landing_page_url`, else the `openalex.org/W...` id URL).
+- The URL is always a field of a matched, authority-returned record — never model-generated.
+- If NO record matches the ref, that is `NOT_FOUND` (a real failure). A `NOT_FOUND` is never
+  turned into a URL.
+
+The `[url]` tag flags weak verifications for human audit: a `[url]` ref deserves a second look
+before it goes into a bibliography, whereas `[doi]`/`[arxiv]` are machine-anchored.
 
 ## Offline / API down
 

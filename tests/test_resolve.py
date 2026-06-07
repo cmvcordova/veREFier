@@ -37,13 +37,28 @@ def test_resolve_arxiv_returns_eprint():
     assert cand.identifier == "1802.03426"
     assert cand.year == 2018
 
+def test_strength_of_orders_tiers():
+    assert vr.strength_of("doi") == 3
+    assert vr.strength_of("arxiv") == 2
+    assert vr.strength_of("url") == 1
+    assert vr.strength_of("openalex") == 0
+    assert vr.strength_of(None) == 0
+
 def test_resolve_openalex_returns_workid_when_no_doi():
     ref = vr.Ref(key="pythia", raw="", title="Pythia A Suite for Analyzing Large Language Models",
                  authors=["Biderman"], year=2023)
     cand = vr.resolve_openalex(ref, fetch=_stub(FIX / "openalex_pythia.json"))
-    assert cand.identifier_type == "openalex"
-    assert cand.identifier == "W4385245566"
+    # no doi and no primary_location -> falls back to the openalex.org landing URL
+    assert cand.identifier_type == "url"
+    assert cand.identifier == "https://openalex.org/W4385245566"
     assert cand.year == 2023
+
+def test_resolve_openalex_no_doi_returns_landing_url():
+    ref = vr.Ref(key="tsne", raw="", title="Visualizing Data using t-SNE",
+                 authors=["van der Maaten"], year=2008)
+    cand = vr.resolve_openalex(ref, fetch=_stub(FIX / "openalex_nodoi_url.json"))
+    assert cand.identifier_type == "url"
+    assert cand.identifier == "https://www.jmlr.org/papers/v9/vandermaaten08a.html"
 
 def test_resolve_cascade_prefers_crossref(monkeypatch):
     ref = vr.Ref(key="tsne", raw="", title="Visualizing Data using t-SNE",

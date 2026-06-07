@@ -1,0 +1,7 @@
+{"results": [
+  {"display_name": "Visualizing Data using t-SNE",
+   "publication_year": 2008, "doi": null,
+   "primary_location": {"landing_page_url": "https://www.jmlr.org/papers/v9/vandermaaten08a.html"},
+   "ids": {"openalex": "https://openalex.org/W2187089797"},
+   "authorships": [{"author": {"display_name": "Laurens van der Maaten"}}]}
+]}

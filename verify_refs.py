@@ -33,6 +33,14 @@ def normalize_surname(s: str) -> str:
 def title_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, normalize_title(a), normalize_title(b)).ratio()
 
+
+_STRENGTH = {"doi": 3, "arxiv": 2, "url": 1}
+
+
+def strength_of(identifier_type) -> int:
+    """Verification-strength tier: doi (3) > arxiv (2) > url (1) > else (0)."""
+    return _STRENGTH.get(identifier_type, 0)
+
 from dataclasses import dataclass, field
 from typing import Optional, List
 
@@ -55,7 +63,7 @@ class Candidate:
     title: str
     authors: List[str]
     year: Optional[int]
-    identifier_type: str   # "doi" | "arxiv" | "openalex"
+    identifier_type: str   # "doi" | "arxiv" | "url"
     identifier: str
     source: str            # "crossref" | "arxiv" | "openalex"
 
@@ -293,8 +301,12 @@ def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
     if doi:
         ident_type, ident = "doi", doi.replace("https://doi.org/", "")
     else:
-        ident_type = "openalex"
-        ident = it.get("ids", {}).get("openalex", "").rsplit("/", 1)[-1]
+        # The authority asserts this work has no DOI. Emit its stable landing URL
+        # (a field of the matched record), never a fabricated identifier.
+        ident_type = "url"
+        landing = (it.get("primary_location") or {}).get("landing_page_url") or ""
+        oa = it.get("ids", {}).get("openalex", "") or ""  # full https://openalex.org/W... URL
+        ident = landing or (oa if oa.startswith("http") else (f"https://openalex.org/{oa}" if oa else ""))
     if not ident:
         return None
     return Candidate(title=it.get("display_name", ""), authors=authors,
@@ -333,6 +345,7 @@ def check_ref(ref: Ref, resolver=None) -> dict:
     return {
         "key": ref.key, "claimed_title": ref.title, "verdict": v,
         "identifier_type": cand.identifier_type if cand else None,
+        "strength": strength_of(cand.identifier_type) if cand else 0,
         "identifier": cand.identifier if cand else None,
         "source": cand.source if cand else None,
         "matched_title": cand.title if cand else None,
@@ -347,7 +360,9 @@ def emit_bib(results) -> str:
     for r in results:
         if r["verdict"] != VERIFIED:
             continue
-        idline = (f"  doi = {{{r['identifier']}}}," if r["identifier_type"] == "doi"
+        it = r["identifier_type"]
+        idline = (f"  doi = {{{r['identifier']}}}," if it == "doi"
+                  else f"  url = {{{r['identifier']}}}," if it == "url"
                   else f"  eprint = {{{r['identifier']}}},")
         authors = " and ".join(r.get("authors") or [])
         out.append(f"@misc{{{r['key']},\n  title = {{{r['title']}}},\n"
@@ -358,13 +373,20 @@ def emit_bib(results) -> str:
 def emit_report(results) -> str:
     lines = ["# Reference verification report", ""]
     n = {VERIFIED: 0, MISMATCH: 0, NOT_FOUND: 0}
+    tiers = {"doi": 0, "arxiv": 0, "url": 0}
     for r in results:
         n[r["verdict"]] += 1
+        tier = (r.get("identifier_type") if r["verdict"] == VERIFIED else None)
+        if tier in tiers:
+            tiers[tier] += 1
+        tag = f" [{tier}]" if tier else ""
         tail = (f" -> {r.get('source')}:{r.get('identifier')}" if r.get("identifier") else "")
         warn = (f"  [claimed vs matched: \"{r.get('claimed_title','')}\" / "
                 f"\"{r.get('matched_title','')}\"]" if r["verdict"] == MISMATCH else "")
-        lines.append(f"- `{r.get('key')}` **{r['verdict']}**{tail}{warn}")
-    lines += ["", f"VERIFIED {n[VERIFIED]} | MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]}"]
+        lines.append(f"- `{r.get('key')}` **{r['verdict']}**{tag}{tail}{warn}")
+    lines += ["", (f"VERIFIED {n[VERIFIED]} "
+                   f"(doi {tiers['doi']} / arxiv {tiers['arxiv']} / url {tiers['url']}) | "
+                   f"MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]}")]
     return "\n".join(lines)
 
 
