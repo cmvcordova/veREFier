@@ -73,3 +73,10 @@ def test_verdict_still_mismatch_when_ref_authors_present_and_wrong():
     ref = _ref(title="Diffusion maps", authors=["Nobody"], year=2006)
     cand = _cand(title="Diffusion maps", authors=["Coifman", "Lafon"], year=2006)
     assert vr.verdict(ref, cand) == vr.MISMATCH
+
+def test_verdict_no_crash_when_author_normalizes_to_empty():
+    # an author token that is all LaTeX/punctuation (e.g. "{\&}") survives the
+    # truthiness filter but normalizes to "" -> .split()[-1] must not IndexError
+    ref = _ref(title="Diffusion maps", authors=[r"\&"], year=2006)
+    cand = _cand(title="Diffusion maps", authors=["Coifman"], year=2006)
+    assert vr.verdict(ref, cand) == vr.MISMATCH

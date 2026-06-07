@@ -59,10 +59,17 @@ class Candidate:
     source: str            # "crossref" | "arxiv" | "openalex"
 
 
+def _surnames(authors) -> set:
+    out = set()
+    for a in authors:
+        parts = normalize_surname(a).split()
+        if parts:
+            out.add(parts[-1])
+    return out
+
+
 def _author_overlap(ref_authors, cand_authors) -> bool:
-    r = {normalize_surname(a).split()[-1] for a in ref_authors if a.strip()}
-    c = {normalize_surname(a).split()[-1] for a in cand_authors if a.strip()}
-    return bool(r & c)
+    return bool(_surnames(ref_authors) & _surnames(cand_authors))
 
 
 def _year_ok(ry, cy) -> bool:
