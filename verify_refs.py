@@ -32,3 +32,49 @@ def normalize_surname(s: str) -> str:
 
 def title_similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, normalize_title(a), normalize_title(b)).ratio()
+
+from dataclasses import dataclass, field
+from typing import Optional, List
+
+TITLE_THRESHOLD = 0.90
+
+
+@dataclass
+class Ref:
+    key: Optional[str]
+    raw: str
+    title: str = ""
+    authors: List[str] = field(default_factory=list)
+    year: Optional[int] = None
+    doi: Optional[str] = None
+
+
+@dataclass
+class Candidate:
+    title: str
+    authors: List[str]
+    year: Optional[int]
+    identifier_type: str   # "doi" | "arxiv" | "openalex"
+    identifier: str
+    source: str            # "crossref" | "arxiv" | "openalex"
+
+
+def _author_overlap(ref_authors, cand_authors) -> bool:
+    r = {normalize_surname(a).split()[-1] for a in ref_authors if a.strip()}
+    c = {normalize_surname(a).split()[-1] for a in cand_authors if a.strip()}
+    return bool(r & c)
+
+
+def _year_ok(ry, cy) -> bool:
+    if ry is None or cy is None:
+        return True            # year absent on one side is not disqualifying
+    return abs(int(ry) - int(cy)) <= 1
+
+
+def verdict(ref: Ref, cand: Optional[Candidate]) -> str:
+    if cand is None:
+        return NOT_FOUND
+    title_ok = title_similarity(ref.title, cand.title) >= TITLE_THRESHOLD
+    if title_ok and _author_overlap(ref.authors, cand.authors) and _year_ok(ref.year, cand.year):
+        return VERIFIED
+    return MISMATCH
