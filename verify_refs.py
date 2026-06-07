@@ -130,3 +130,36 @@ def detect_format(text: str) -> str:
 def parse(text: str, fmt: Optional[str] = None) -> List[Ref]:
     fmt = fmt or detect_format(text)
     return {"bib": parse_bib, "bibitem": parse_bibitems, "list": parse_list}[fmt](text)
+
+import json
+import urllib.parse
+import urllib.request
+
+USER_AGENT = "ref-checker/1.0 (mailto:anonymous@example.com)"
+
+
+def _http_get(url: str, headers: Optional[dict] = None) -> str:
+    req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def resolve_crossref(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+    q = urllib.parse.quote(ref.title or ref.raw)
+    url = f"https://api.crossref.org/works?query.bibliographic={q}&rows=5"
+    try:
+        items = json.loads(fetch(url)).get("message", {}).get("items", [])
+    except Exception:
+        return None
+    if not items:
+        return None
+    it = items[0]
+    title = (it.get("title") or [""])[0]
+    authors = [a.get("family", "") for a in it.get("author", []) if a.get("family")]
+    parts = it.get("issued", {}).get("date-parts", [[None]])
+    year = parts[0][0] if parts and parts[0] else None
+    doi = it.get("DOI")
+    if not doi:
+        return None
+    return Candidate(title=title, authors=authors, year=year,
+                     identifier_type="doi", identifier=doi, source="crossref")
