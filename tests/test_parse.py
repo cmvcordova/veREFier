@@ -24,6 +24,16 @@ def test_parse_bibitems_extracts_key_and_raw():
     assert refs[0].year == 2019
     assert "Visualizing structure" in refs[0].raw
 
+MULTILINE = (r"\bibitem{umap} L.~McInnes, J.~Healy, J.~Melville, ``UMAP: Uniform manifold "
+             "approximation and\n  projection,'' \\emph{arXiv:1802.03426}, 2018.")
+
+def test_parse_bibitem_title_spans_linebreak():
+    refs = vr.parse_bibitems(MULTILINE)
+    assert len(refs) == 1
+    assert refs[0].title == "UMAP: Uniform manifold approximation and projection"
+    assert refs[0].year == 2018
+
+
 def test_parse_list_one_per_line():
     refs = vr.parse_list("Diffusion maps\nAttention is all you need\n")
     assert [r.title for r in refs] == ["Diffusion maps", "Attention is all you need"]

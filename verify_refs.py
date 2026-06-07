@@ -115,9 +115,11 @@ def parse_bibitems(text: str) -> List[Ref]:
         key, raw = m.group(1), m.group(2).strip()
         ym = _YEAR.search(raw)
         # title heuristic: text inside the first ``...'' quotes
-        tm = re.search(r"``(.+?)''", raw) or re.search(r'"(.+?)"', raw)
+        tm = re.search(r"``(.+?)''", raw, re.DOTALL) or re.search(r'"(.+?)"', raw, re.DOTALL)
+        title = re.sub(r"\s+", " ", tm.group(1)).strip() if tm else re.sub(r"\s+", " ", raw[:80]).strip()
+        title = title.rstrip(",.;: ")
         refs.append(Ref(key=key, raw=raw,
-                        title=tm.group(1) if tm else raw[:80],
+                        title=title,
                         authors=[], year=int(ym.group(0)) if ym else None, doi=None))
     return refs
 
