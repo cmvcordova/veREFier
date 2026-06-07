@@ -299,14 +299,27 @@ def main(argv=None):
     ap.add_argument("--offline", action="store_true",
                     help="do not hit the network; every ref becomes NOT_FOUND")
     args = ap.parse_args(argv)
-    text = sys.stdin.read() if args.input == "-" else open(args.input).read()
+    if args.input == "-":
+        text = sys.stdin.read()
+    else:
+        try:
+            with open(args.input) as f:
+                text = f.read()
+        except OSError as e:
+            print(f"error: cannot read {args.input}: {e}", file=sys.stderr)
+            return 2
     refs = parse(text, args.format)
     resolver = (lambda r: None) if args.offline else None
     results = [check_ref(r, resolver=resolver) for r in refs]
     report = emit_report(results)
-    (open(args.report, "w").write(report) if args.report else print(report))
+    if args.report:
+        with open(args.report, "w") as f:
+            f.write(report)
+    else:
+        print(report)
     if args.out_bib:
-        open(args.out_bib, "w").write(emit_bib(results))
+        with open(args.out_bib, "w") as f:
+            f.write(emit_bib(results))
     return 0 if all(r["verdict"] == VERIFIED for r in results) else 1
 
 
