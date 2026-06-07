@@ -42,3 +42,38 @@ def test_detect_format():
     assert vr.detect_format(BIB) == "bib"
     assert vr.detect_format(BIBITEM) == "bibitem"
     assert vr.detect_format("just a title line") == "list"
+
+
+def test_parse_bibitem_extracts_author_surnames():
+    bi = (r"\bibitem{umap} L.~McInnes, J.~Healy, J.~Melville, "
+          "``UMAP: Uniform manifold approximation and projection,'' \\emph{arXiv:1802.03426}, 2018.")
+    refs = vr.parse_bibitems(bi)
+    surs = " ".join(refs[0].authors).lower()
+    assert "mcinnes" in surs and "healy" in surs and "melville" in surs
+
+
+def test_parse_bibitem_authors_handle_etal_and_initials():
+    bi = r"\bibitem{phate} K.~R. Moon et al., ``Visualizing structure,'' \emph{Nat.}, 2019."
+    refs = vr.parse_bibitems(bi)
+    assert any("moon" in a.lower() for a in refs[0].authors)
+
+
+def test_parse_bibitem_authors_and_separator():
+    bi = r"\bibitem{jl} W.~B. Johnson and J.~Lindenstrauss, ``Extensions,'' \emph{Contemp. Math.}, 1984."
+    refs = vr.parse_bibitems(bi)
+    surs = " ".join(refs[0].authors).lower()
+    assert "johnson" in surs and "lindenstrauss" in surs
+
+
+def test_umap_bibitem_rejects_rpackage_author():
+    bi = (r"\bibitem{umap} L.~McInnes, J.~Healy, J.~Melville, "
+          "``UMAP: Uniform Manifold Approximation and Projection,'' \\emph{arXiv:1802.03426}, 2018.")
+    ref = vr.parse_bibitems(bi)[0]
+    rpkg = vr.Candidate(title="umap: Uniform Manifold Approximation and Projection",
+                        authors=["Konopka"], year=2018, identifier_type="doi",
+                        identifier="10.32614/cran.package.umap", source="crossref")
+    paper = vr.Candidate(title="UMAP: Uniform Manifold Approximation and Projection",
+                         authors=["McInnes", "Healy", "Melville"], year=2018,
+                         identifier_type="arxiv", identifier="1802.03426", source="arxiv")
+    assert vr.verdict(ref, rpkg) == vr.MISMATCH
+    assert vr.verdict(ref, paper) == vr.VERIFIED

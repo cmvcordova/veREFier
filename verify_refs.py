@@ -108,6 +108,36 @@ def parse_bib(text: str) -> List[Ref]:
     return refs
 
 
+_INITIAL = re.compile(r"^[A-Z](\.[A-Z])*\.?$")
+
+
+def parse_authors_from_bibitem(raw: str) -> List[str]:
+    """Extract author surnames from the text before the first ``...'' title quote.
+
+    Network-free, stdlib only. Returns [] for quote-less/empty input.
+    """
+    if not raw:
+        return []
+    idx = raw.find("``")
+    if idx < 0:
+        return []
+    head = raw[:idx]
+    head = head.replace("~", " ")
+    head = re.sub(r"\\emph\{[^}]*\}", " ", head)   # drop \emph{...}
+    head = re.sub(r"\\[a-zA-Z]+", " ", head)        # drop other latex commands
+    head = re.sub(r"[{}]", " ", head)                # drop stray braces
+    head = re.sub(r"\bet\s+al\.?", " ", head)       # drop "et al."
+    chunks = re.split(r",|\band\b", head)
+    authors: List[str] = []
+    for chunk in chunks:
+        tokens = chunk.split()
+        surname = [t for t in tokens if not _INITIAL.match(t)]
+        name = " ".join(surname).strip(" .,;:")
+        if name:
+            authors.append(name)
+    return authors
+
+
 def parse_bibitems(text: str) -> List[Ref]:
     refs = []
     for m in re.finditer(r"\\bibitem\{([^}]+)\}(.*?)(?=\\bibitem\{|\\end\{thebibliography\}|$)",
@@ -120,7 +150,8 @@ def parse_bibitems(text: str) -> List[Ref]:
         title = title.rstrip(",.;: ")
         refs.append(Ref(key=key, raw=raw,
                         title=title,
-                        authors=[], year=int(ym.group(0)) if ym else None, doi=None))
+                        authors=parse_authors_from_bibitem(raw),
+                        year=int(ym.group(0)) if ym else None, doi=None))
     return refs
 
 
