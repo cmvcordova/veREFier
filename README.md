@@ -13,3 +13,6 @@ Copy this directory where your agent loads skills. See `SKILL.md`.
     python -m pytest tests/ -v   # fully offline; network is stubbed
 
 Python 3, standard library only.
+
+## License
+MIT — see LICENSE
