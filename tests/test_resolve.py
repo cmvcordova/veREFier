@@ -18,6 +18,12 @@ def test_resolve_crossref_returns_candidate():
     assert cand.year == 2008
     assert any("Maaten" in a for a in cand.authors)
 
+def test_resolve_crossref_picks_best_title_match_not_first():
+    ref = vr.Ref(key="tsne", raw="", title="Visualizing Data using t-SNE",
+                 authors=["van der Maaten"], year=2008)
+    cand = vr.resolve_crossref(ref, fetch=_stub(FIX / "crossref_tsne_ranked.json"))
+    assert cand.identifier == "10.5555/1953048.2021068"
+
 def test_resolve_crossref_empty_returns_none():
     ref = vr.Ref(key="x", raw="", title="nope")
     cand = vr.resolve_crossref(ref, fetch=lambda u, headers=None: '{"message":{"items":[]}}')

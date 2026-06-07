@@ -154,7 +154,7 @@ def resolve_crossref(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
         return None
     if not items:
         return None
-    it = items[0]
+    it = max(items, key=lambda x: title_similarity(ref.title, (x.get("title") or [""])[0]))
     title = (it.get("title") or [""])[0]
     authors = [a.get("family", "") for a in it.get("author", []) if a.get("family")]
     parts = it.get("issued", {}).get("date-parts", [[None]])
@@ -178,9 +178,11 @@ def resolve_arxiv(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
     except Exception:
         return None
     ns = {"a": "http://www.w3.org/2005/Atom"}
-    entry = root.find("a:entry", ns)
-    if entry is None:
+    entries = root.findall("a:entry", ns)
+    if not entries:
         return None
+    entry = max(entries, key=lambda e: title_similarity(
+        ref.title, (e.findtext("a:title", default="", namespaces=ns) or "").strip()))
     title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip()
     idtext = entry.findtext("a:id", default="", namespaces=ns) or ""
     m = _ARXIV_ID.search(idtext)
@@ -203,7 +205,7 @@ def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
         return None
     if not results:
         return None
-    it = results[0]
+    it = max(results, key=lambda x: title_similarity(ref.title, x.get("display_name", "") or ""))
     authors = [a.get("author", {}).get("display_name", "") for a in it.get("authorships", [])]
     doi = it.get("doi")
     if doi:

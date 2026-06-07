@@ -1,0 +1,7 @@
+{"message": {"items": [
+  {"DOI": "10.9999/wrong", "title": ["q-SNE: quasi t-SNE"],
+   "author": [{"family": "Other"}], "issued": {"date-parts": [[2021]]}},
+  {"DOI": "10.5555/1953048.2021068", "title": ["Visualizing Data using t-SNE"],
+   "author": [{"family": "van der Maaten"}, {"family": "Hinton"}],
+   "issued": {"date-parts": [[2008]]}}
+]}}
