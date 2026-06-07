@@ -233,3 +233,72 @@ def resolve(ref: Ref, fetch_crossref=_http_get, fetch_arxiv=_http_get,
         if cand is not None:
             return cand
     return None
+
+import argparse
+import sys
+
+
+def check_ref(ref: Ref, resolver=None) -> dict:
+    resolver = resolver or (lambda r: resolve(r))
+    cand = resolver(ref)
+    v = verdict(ref, cand)
+    return {
+        "key": ref.key, "claimed_title": ref.title, "verdict": v,
+        "identifier_type": cand.identifier_type if cand else None,
+        "identifier": cand.identifier if cand else None,
+        "source": cand.source if cand else None,
+        "matched_title": cand.title if cand else None,
+        "title": cand.title if (cand and v == VERIFIED) else ref.title,
+        "authors": cand.authors if (cand and v == VERIFIED) else ref.authors,
+        "year": cand.year if (cand and v == VERIFIED) else ref.year,
+    }
+
+
+def emit_bib(results) -> str:
+    out = []
+    for r in results:
+        if r["verdict"] != VERIFIED:
+            continue
+        idline = (f"  doi = {{{r['identifier']}}}," if r["identifier_type"] == "doi"
+                  else f"  eprint = {{{r['identifier']}}},")
+        authors = " and ".join(r.get("authors") or [])
+        out.append(f"@misc{{{r['key']},\n  title = {{{r['title']}}},\n"
+                   f"  author = {{{authors}}},\n  year = {{{r.get('year')}}},\n{idline}\n}}")
+    return "\n\n".join(out) + ("\n" if out else "")
+
+
+def emit_report(results) -> str:
+    lines = ["# Reference verification report", ""]
+    n = {VERIFIED: 0, MISMATCH: 0, NOT_FOUND: 0}
+    for r in results:
+        n[r["verdict"]] += 1
+        tail = (f" -> {r.get('source')}:{r.get('identifier')}" if r.get("identifier") else "")
+        warn = (f"  [claimed vs matched: \"{r.get('claimed_title','')}\" / "
+                f"\"{r.get('matched_title','')}\"]" if r["verdict"] == MISMATCH else "")
+        lines.append(f"- `{r.get('key')}` **{r['verdict']}**{tail}{warn}")
+    lines += ["", f"VERIFIED {n[VERIFIED]} | MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]}"]
+    return "\n".join(lines)
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(description="Verify references behind a resolved identifier.")
+    ap.add_argument("input", help="path to a .bib / bibitem / list file ('-' for stdin)")
+    ap.add_argument("--format", choices=["bib", "bibitem", "list"], default=None)
+    ap.add_argument("--out-bib", default=None)
+    ap.add_argument("--report", default=None)
+    ap.add_argument("--offline", action="store_true",
+                    help="do not hit the network; every ref becomes NOT_FOUND")
+    args = ap.parse_args(argv)
+    text = sys.stdin.read() if args.input == "-" else open(args.input).read()
+    refs = parse(text, args.format)
+    resolver = (lambda r: None) if args.offline else None
+    results = [check_ref(r, resolver=resolver) for r in refs]
+    report = emit_report(results)
+    (open(args.report, "w").write(report) if args.report else print(report))
+    if args.out_bib:
+        open(args.out_bib, "w").write(emit_bib(results))
+    return 0 if all(r["verdict"] == VERIFIED for r in results) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
