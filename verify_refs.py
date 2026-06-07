@@ -78,3 +78,55 @@ def verdict(ref: Ref, cand: Optional[Candidate]) -> str:
     if title_ok and _author_overlap(ref.authors, cand.authors) and _year_ok(ref.year, cand.year):
         return VERIFIED
     return MISMATCH
+
+_BIB_ENTRY = re.compile(r"@\w+\s*\{\s*([^,]+),(.*?)\}\s*(?=@|\Z)", re.DOTALL)
+_FIELD = re.compile(r"(\w+)\s*=\s*[{\"](.+?)[}\"]\s*,?\s*\n?", re.DOTALL)
+_YEAR = re.compile(r"\b(19|20)\d{2}\b")
+
+
+def _split_authors(s: str) -> List[str]:
+    return [a.strip() for a in re.split(r"\s+and\s+", s) if a.strip()]
+
+
+def parse_bib(text: str) -> List[Ref]:
+    refs = []
+    for key, body in _BIB_ENTRY.findall(text):
+        fields = {k.lower(): v.strip() for k, v in _FIELD.findall(body)}
+        year = int(fields["year"]) if fields.get("year", "").strip().isdigit() else None
+        refs.append(Ref(key=key.strip(), raw=body.strip(),
+                        title=re.sub(r"[{}]", "", fields.get("title", "")),
+                        authors=_split_authors(fields.get("author", "")),
+                        year=year, doi=fields.get("doi") or None))
+    return refs
+
+
+def parse_bibitems(text: str) -> List[Ref]:
+    refs = []
+    for m in re.finditer(r"\\bibitem\{([^}]+)\}(.*?)(?=\\bibitem\{|\\end\{thebibliography\}|$)",
+                         text, re.DOTALL):
+        key, raw = m.group(1), m.group(2).strip()
+        ym = _YEAR.search(raw)
+        # title heuristic: text inside the first ``...'' quotes
+        tm = re.search(r"``(.+?)''", raw) or re.search(r'"(.+?)"', raw)
+        refs.append(Ref(key=key, raw=raw,
+                        title=tm.group(1) if tm else raw[:80],
+                        authors=[], year=int(ym.group(0)) if ym else None, doi=None))
+    return refs
+
+
+def parse_list(text: str) -> List[Ref]:
+    return [Ref(key=None, raw=line.strip(), title=line.strip())
+            for line in text.splitlines() if line.strip()]
+
+
+def detect_format(text: str) -> str:
+    if "\\bibitem" in text:
+        return "bibitem"
+    if re.search(r"@\w+\s*\{", text):
+        return "bib"
+    return "list"
+
+
+def parse(text: str, fmt: Optional[str] = None) -> List[Ref]:
+    fmt = fmt or detect_format(text)
+    return {"bib": parse_bib, "bibitem": parse_bibitems, "list": parse_list}[fmt](text)
