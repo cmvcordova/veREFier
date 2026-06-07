@@ -163,3 +163,73 @@ def resolve_crossref(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
         return None
     return Candidate(title=title, authors=authors, year=year,
                      identifier_type="doi", identifier=doi, source="crossref")
+
+import xml.etree.ElementTree as ET
+
+_ARXIV_ID = re.compile(r"(\d{4}\.\d{4,5})")
+
+
+def resolve_arxiv(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+    q = urllib.parse.quote(normalize_title(ref.title or ref.raw))
+    url = f"http://export.arxiv.org/api/query?search_query=ti:{q}&max_results=5"
+    try:
+        root = ET.fromstring(fetch(url))
+    except Exception:
+        return None
+    ns = {"a": "http://www.w3.org/2005/Atom"}
+    entry = root.find("a:entry", ns)
+    if entry is None:
+        return None
+    title = (entry.findtext("a:title", default="", namespaces=ns) or "").strip()
+    idtext = entry.findtext("a:id", default="", namespaces=ns) or ""
+    m = _ARXIV_ID.search(idtext)
+    if not m:
+        return None
+    authors = [e.findtext("a:name", default="", namespaces=ns)
+               for e in entry.findall("a:author", ns)]
+    pub = entry.findtext("a:published", default="", namespaces=ns) or ""
+    year = int(pub[:4]) if pub[:4].isdigit() else None
+    return Candidate(title=title, authors=authors, year=year,
+                     identifier_type="arxiv", identifier=m.group(1), source="arxiv")
+
+
+def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+    q = urllib.parse.quote(ref.title or ref.raw)
+    url = f"https://api.openalex.org/works?search={q}&per-page=5"
+    try:
+        results = json.loads(fetch(url)).get("results", [])
+    except Exception:
+        return None
+    if not results:
+        return None
+    it = results[0]
+    authors = [a.get("author", {}).get("display_name", "") for a in it.get("authorships", [])]
+    doi = it.get("doi")
+    if doi:
+        ident_type, ident = "doi", doi.replace("https://doi.org/", "")
+    else:
+        ident_type = "openalex"
+        ident = it.get("ids", {}).get("openalex", "").rsplit("/", 1)[-1]
+    if not ident:
+        return None
+    return Candidate(title=it.get("display_name", ""), authors=authors,
+                     year=it.get("publication_year"),
+                     identifier_type=ident_type, identifier=ident, source="openalex")
+
+
+def resolve(ref: Ref, fetch_crossref=_http_get, fetch_arxiv=_http_get,
+            fetch_openalex=_http_get) -> Optional[Candidate]:
+    for fn, fetch in ((resolve_crossref, fetch_crossref),
+                      (resolve_arxiv, fetch_arxiv),
+                      (resolve_openalex, fetch_openalex)):
+        cand = fn(ref, fetch=fetch)
+        if cand is not None and verdict(ref, cand) == VERIFIED:
+            return cand
+    # return the best non-verified candidate (Crossref first) for MISMATCH reporting
+    for fn, fetch in ((resolve_crossref, fetch_crossref),
+                      (resolve_arxiv, fetch_arxiv),
+                      (resolve_openalex, fetch_openalex)):
+        cand = fn(ref, fetch=fetch)
+        if cand is not None:
+            return cand
+    return None
