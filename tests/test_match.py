@@ -48,9 +48,9 @@ def test_titles_agree_keeps_legit_variants():
     assert vr._titles_agree("Visualising data using t-SNE", "Visualizing data using t-SNE")  # spelling
     assert vr._titles_agree("{SCANPY}: Large-Scale Single-Cell Gene Expression Data Analysis",
                             "SCANPY: large-scale single-cell gene expression data analysis")  # latex/case
-    assert vr._titles_agree(  # reordered subtitle, same words
-        "scDEED: a statistical method for detecting dubious 2D embeddings",
-        "Statistical method scDEED for detecting dubious 2D embeddings")
+    assert vr._titles_agree(  # reordered subtitle, same words (real scDEED title surface forms)
+        "scDEED: a statistical method for detecting dubious 2D single-cell embeddings and optimizing t-SNE and UMAP hyperparameters",
+        "Statistical method scDEED for detecting dubious 2D single-cell embeddings and optimizing t-SNE and UMAP hyperparameters")
 
 def test_verdict_mismatch_on_swapped_method_name_even_with_author_year():
     # the dangerous case: same author + same year, one decisive word differs -> must MISMATCH
