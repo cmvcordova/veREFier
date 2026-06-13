@@ -101,8 +101,44 @@ def verdict(ref: Ref, cand: Optional[Candidate]) -> str:
         return VERIFIED
     return MISMATCH
 
-_BIB_ENTRY = re.compile(r"@\w+\s*\{\s*([^,]+),(.*?)\}\s*(?=@|\Z)", re.DOTALL)
+_BIB_START = re.compile(r"@(\w+)\s*\{")
 _FIELD = re.compile(r"(\w+)\s*=\s*[{\"](.+?)[}\"]\s*,?\s*\n?", re.DOTALL)
+
+
+def _iter_bib_entries(text: str):
+    """Yield (key, body) per BibTeX entry, delimiting each by BALANCED braces.
+
+    The previous regex terminated an entry only at a ``}`` followed by ``@``/EOF,
+    so a ``% comment`` (or any non-``@`` text) between entries made it swallow the
+    next entry — silently merging and DROPPING references. Counting braces from the
+    entry's opening ``{`` is robust to inter-entry comments and stray ``@`` (e.g. an
+    email), and to nested field braces. ``@comment``/``@string``/``@preamble`` are skipped.
+    """
+    pos = 0
+    for m in _BIB_START.finditer(text):
+        if m.start() < pos:
+            continue  # a brace/`@` inside an already-consumed entry body
+        if m.group(1).lower() in ("comment", "string", "preamble"):
+            continue
+        open_brace = m.end() - 1
+        depth, j = 0, open_brace
+        while j < len(text):
+            c = text[j]
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        if depth != 0:
+            continue  # unbalanced entry; skip rather than swallow the rest of the file
+        pos = j + 1
+        inner = text[open_brace + 1:j]
+        comma = inner.find(",")
+        if comma < 0:
+            continue
+        yield inner[:comma].strip(), inner[comma + 1:]
 _YEAR = re.compile(r"\b(19|20)\d{2}\b")
 
 
@@ -124,7 +160,7 @@ def _split_authors(s: str) -> List[str]:
 
 def parse_bib(text: str) -> List[Ref]:
     refs = []
-    for key, body in _BIB_ENTRY.findall(text):
+    for key, body in _iter_bib_entries(text):
         fields = {k.lower(): v.strip() for k, v in _FIELD.findall(body)}
         year = int(fields["year"]) if fields.get("year", "").strip().isdigit() else None
         arxiv = (extract_arxiv_id(fields.get("eprint", ""))

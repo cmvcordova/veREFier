@@ -17,6 +17,34 @@ def test_parse_bib_extracts_fields():
     assert r.year == 2008
     assert r.doi == "10.5555/x"
 
+COMMENTED_BIB = r"""
+% === first group ===
+@article{a, title={First Paper}, author={Smith, Jane}, year={2001}, doi={10.1/a}}
+
+% === second group ===
+@article{b, title={Second Paper}, author={Doe, John}, year={2002}, doi={10.2/b}}
+@inproceedings{c, title={Third Paper}, author={Roe, Amy}, year={2003}}
+"""
+
+def test_parse_bib_not_broken_by_comments_between_entries():
+    # regression: a `% comment` between entries must NOT make the parser swallow/drop
+    # the next entry, nor mis-pair a key with a later entry's title
+    refs = vr.parse_bib(COMMENTED_BIB)
+    by_key = {r.key: r for r in refs}
+    assert set(by_key) == {"a", "b", "c"}            # none dropped
+    assert by_key["a"].title == "First Paper"        # key not mis-paired with a later title
+    assert by_key["b"].title == "Second Paper"
+    assert by_key["c"].title == "Third Paper"
+    assert by_key["a"].doi == "10.1/a" and by_key["b"].doi == "10.2/b"
+
+def test_parse_bib_skips_string_and_handles_at_in_comment():
+    bib = ("% see foo@example.com for contact\n"
+           "@string{nat = {Nature}}\n"
+           "@article{x, title={Real Paper}, author={A, B}, year={2020}, doi={10.x/y}}\n")
+    refs = vr.parse_bib(bib)
+    assert [r.key for r in refs] == ["x"]
+    assert refs[0].title == "Real Paper"
+
 def test_parse_bibitems_extracts_key_and_raw():
     refs = vr.parse_bibitems(BIBITEM)
     assert len(refs) == 1
