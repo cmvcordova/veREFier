@@ -1,9 +1,9 @@
 ---
-name: ref-checker
+name: verefier
 description: Use when emitting, assembling, repairing, or checking any bibliography, citation, \cite, \bibitem, BibTeX entry, or reference list — verifies every reference against Crossref/arXiv/OpenAlex and emits only DOI/arXiv/OpenAlex-resolved matches, so citations cannot be hallucinated. Triggers both on explicit "check/verify these refs" requests and as a guardrail whenever you are about to write a citation.
 ---
 
-# ref-checker
+# veREFier
 
 ## The one rule
 

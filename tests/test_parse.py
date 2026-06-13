@@ -45,6 +45,14 @@ def test_parse_bib_skips_string_and_handles_at_in_comment():
     assert [r.key for r in refs] == ["x"]
     assert refs[0].title == "Real Paper"
 
+def test_parse_bib_keeps_full_title_with_nested_braces():
+    # regression: a value with a nested {group} must not be truncated at the first "}"
+    bib = (r"@article{x, title={{scDEED}: a statistical method for {2D} embeddings}, "
+           r"author={Xia, Lucy}, year={2024}, doi={10.1/x}}")
+    r = vr.parse_bib(bib)[0]
+    assert r.title == "scDEED: a statistical method for 2D embeddings"
+    assert r.doi == "10.1/x"
+
 def test_parse_bibitems_extracts_key_and_raw():
     refs = vr.parse_bibitems(BIBITEM)
     assert len(refs) == 1

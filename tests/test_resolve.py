@@ -100,6 +100,46 @@ def test_cascade_uses_arxiv_id_first_and_verifies():
     assert cand.source == "arxiv" and cand.identifier == "2304.01373"
     assert vr.verdict(ref, cand) == vr.VERIFIED
 
+def _works(title, family, year):
+    return ('{"message":{"title":["' + title + '"],"author":[{"family":"' + family +
+            '"}],"issued":{"date-parts":[[' + str(year) + ']]}}}')
+
+def test_resolve_doi_by_id_returns_stated_doi_record():
+    ref = vr.Ref(key="x", raw="", title="Diffusion maps", authors=["Coifman"], year=2006,
+                 doi="10.1016/j.acha.2006.04.006")
+    cand = vr.resolve_doi_by_id(ref, fetch=lambda u, headers=None: _works("Diffusion maps", "Coifman", 2006))
+    assert cand.identifier_type == "doi" and cand.identifier == "10.1016/j.acha.2006.04.006"
+    assert vr.verdict(ref, cand) == vr.VERIFIED
+
+def test_resolve_doi_by_id_none_when_no_doi_or_unresolvable():
+    assert vr.resolve_doi_by_id(vr.Ref(key="x", raw="", title="t"), fetch=lambda u, headers=None: "{}") is None
+    ref = vr.Ref(key="x", raw="", title="t", doi="10.9/missing")
+    assert vr.resolve_doi_by_id(ref, fetch=lambda u, headers=None: '{"message":{}}') is None
+
+def test_cascade_wrong_stated_doi_is_caught_not_silently_corrected():
+    # anti-hallucination: a stated DOI that resolves to a DIFFERENT paper must MISMATCH,
+    # even though a title search would find the right paper. The stated id is authoritative.
+    ref = vr.Ref(key="scdeed", raw="", title="Statistical method scDEED for detecting dubious embeddings",
+                 authors=["Xia"], year=2024, doi="10.1038/s41467-024-54451-3")
+    wrong_doi_record = _works("Accelerated optimization in deep learning with a PID controller", "Wang", 2024)
+    right_by_title = ('{"message":{"items":[{"title":["Statistical method scDEED for detecting dubious embeddings"],'
+                      '"author":[{"family":"Xia"}],"issued":{"date-parts":[[2024]]},"DOI":"10.1038/s41467-024-45891-y"}]}}')
+    cand = vr.resolve(ref,
+        fetch_crossref=lambda u, headers=None: wrong_doi_record if "works/10.1038" in u else right_by_title,
+        fetch_arxiv=lambda u, headers=None: "<feed></feed>",
+        fetch_openalex=lambda u, headers=None: '{"results":[]}')
+    assert cand.identifier == "10.1038/s41467-024-54451-3"   # judged the STATED doi, not the title match
+    assert vr.verdict(ref, cand) == vr.MISMATCH
+
+def test_cascade_correct_stated_doi_verifies():
+    ref = vr.Ref(key="dm", raw="", title="Diffusion maps", authors=["Coifman"], year=2006,
+                 doi="10.1016/j.acha.2006.04.006")
+    cand = vr.resolve(ref,
+        fetch_crossref=lambda u, headers=None: _works("Diffusion maps", "Coifman", 2006),
+        fetch_arxiv=lambda u, headers=None: "<feed></feed>",
+        fetch_openalex=lambda u, headers=None: '{"results":[]}')
+    assert cand.identifier == "10.1016/j.acha.2006.04.006" and vr.verdict(ref, cand) == vr.VERIFIED
+
 def test_cascade_arxiv_id_wrong_id_is_caught():
     # anti-hallucination: a human-supplied id that resolves to a DIFFERENT paper must NOT verify
     ref = vr.Ref(key="pythia", raw="", title="Pythia: A Suite for Analyzing Large Language Models",

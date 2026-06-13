@@ -1,4 +1,4 @@
-"""ref-checker: verify references against Crossref/arXiv/OpenAlex; emit only matches."""
+"""veREFier: verify references against Crossref/arXiv/OpenAlex; emit only matches."""
 from __future__ import annotations
 
 VERIFIED = "VERIFIED"
@@ -158,10 +158,51 @@ def _split_authors(s: str) -> List[str]:
     return [a.strip() for a in re.split(r"\s+and\s+", s) if a.strip()]
 
 
+_FIELD_NAME = re.compile(r"(\w+)\s*=\s*")
+
+
+def _parse_fields(body: str) -> dict:
+    """Extract ``name = {value}`` / ``name = "value"`` / ``name = bareword`` fields,
+    reading brace values by BALANCED braces. The old ``_FIELD`` regex used a non-greedy
+    ``(.+?)}`` that stopped at the FIRST closing brace, so a value with a nested group
+    (e.g. ``title = {{scDEED}: a statistical ...}``) was truncated to ``scDEED`` — which
+    then mis-searched APIs and false-MISMATCHed. Balanced reading keeps the full value."""
+    fields, i, n = {}, 0, len(body)
+    while True:
+        m = _FIELD_NAME.search(body, i)
+        if not m:
+            break
+        name, j = m.group(1).lower(), m.end()
+        if j >= n:
+            break
+        if body[j] == "{":
+            depth, k = 0, j
+            while k < n:
+                if body[k] == "{":
+                    depth += 1
+                elif body[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            fields[name], i = body[j + 1:k], k + 1
+        elif body[j] == '"':
+            k = body.find('"', j + 1)
+            if k < 0:
+                break
+            fields[name], i = body[j + 1:k], k + 1
+        else:
+            k = j
+            while k < n and body[k] not in ",\n":
+                k += 1
+            fields[name], i = body[j:k].strip(), k + 1
+    return fields
+
+
 def parse_bib(text: str) -> List[Ref]:
     refs = []
     for key, body in _iter_bib_entries(text):
-        fields = {k.lower(): v.strip() for k, v in _FIELD.findall(body)}
+        fields = {k: v.strip() for k, v in _parse_fields(body).items()}
         year = int(fields["year"]) if fields.get("year", "").strip().isdigit() else None
         arxiv = (extract_arxiv_id(fields.get("eprint", ""))
                  or extract_arxiv_id(fields.get("doi", ""))
@@ -243,7 +284,7 @@ import json
 import urllib.parse
 import urllib.request
 
-USER_AGENT = "ref-checker/1.0 (mailto:anonymous@example.com)"
+USER_AGENT = "veREFier/1.0 (mailto:anonymous@example.com)"
 
 
 def _http_get(url: str, headers: Optional[dict] = None) -> str:
@@ -327,6 +368,34 @@ def resolve_arxiv_by_id(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
     return _arxiv_entry_to_candidate(entry, ns, arxiv_id=ref.arxiv)
 
 
+def resolve_doi_by_id(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+    """Dereference the ref's STATED DOI and build a candidate from THAT exact record.
+
+    The title-search resolvers ignore the DOI a ref already carries, so a wrong/fabricated
+    DOI that happens to share a title with the real paper would be silently "corrected"
+    and pass — the tool would never tell you your bibliography points at the wrong DOI.
+    Looking the stated DOI up directly makes it authoritative: if it resolves to a
+    different paper than the ref claims, ``verdict`` returns MISMATCH and the report shows
+    what the DOI actually points to. Returns None if the DOI does not resolve via Crossref
+    (e.g. a DataCite-only DOI), so the caller can fall back to a title search."""
+    if not ref.doi:
+        return None
+    doi = ref.doi.strip()
+    url = f"https://api.crossref.org/works/{urllib.parse.quote(doi)}"
+    try:
+        m = json.loads(fetch(url)).get("message", {})
+    except Exception:
+        return None
+    if not m or not m.get("title"):
+        return None
+    title = re.sub(r"<[^>]+>", "", (m.get("title") or [""])[0])
+    authors = [a.get("family", "") for a in m.get("author", []) if a.get("family")]
+    parts = m.get("issued", {}).get("date-parts", [[None]])
+    year = parts[0][0] if parts and parts[0] else None
+    return Candidate(title=title, authors=authors, year=year,
+                     identifier_type="doi", identifier=doi, source="crossref")
+
+
 def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
     q = urllib.parse.quote(ref.title or ref.raw)
     url = f"https://api.openalex.org/works?search={q}&per-page=5"
@@ -357,18 +426,26 @@ def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
 
 def resolve(ref: Ref, fetch_crossref=_http_get, fetch_arxiv=_http_get,
             fetch_openalex=_http_get, fetch_arxiv_id=_http_get) -> Optional[Candidate]:
-    # an explicit arXiv id stated by the ref is the strongest signal: try it first
-    chain = []
+    # A ref's OWN stated identifier is authoritative: look it up directly and judge the ref
+    # against the record it actually resolves to. A stated id that points at a different
+    # paper must surface as MISMATCH, NOT be silently overridden by a title search that
+    # finds the right paper elsewhere. Only when no stated id resolves do we title-search.
     if ref.arxiv:
-        chain.append((resolve_arxiv_by_id, fetch_arxiv_id))
-    chain += [(resolve_crossref, fetch_crossref),
-              (resolve_arxiv, fetch_arxiv),
-              (resolve_openalex, fetch_openalex)]
+        cand = resolve_arxiv_by_id(ref, fetch=fetch_arxiv_id)
+        if cand is not None:
+            return cand
+    if ref.doi:
+        cand = resolve_doi_by_id(ref, fetch=fetch_crossref)
+        if cand is not None:
+            return cand
+    chain = [(resolve_crossref, fetch_crossref),
+             (resolve_arxiv, fetch_arxiv),
+             (resolve_openalex, fetch_openalex)]
     for fn, fetch in chain:
         cand = fn(ref, fetch=fetch)
         if cand is not None and verdict(ref, cand) == VERIFIED:
             return cand
-    # return the best non-verified candidate (id-lookup first, then Crossref) for MISMATCH reporting
+    # return the best non-verified candidate (Crossref first) for MISMATCH reporting
     for fn, fetch in chain:
         cand = fn(ref, fetch=fetch)
         if cand is not None:
