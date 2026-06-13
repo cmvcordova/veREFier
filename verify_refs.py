@@ -71,7 +71,12 @@ class Candidate:
 def _surnames(authors) -> set:
     out = set()
     for a in authors:
-        parts = normalize_surname(a).split()
+        # BibTeX "Family, Given" puts the surname BEFORE the comma; "Given Family"
+        # order (and most APIs' bare family field) put it last. Detect the comma on
+        # the raw string, since normalize_surname strips it, then take the last token
+        # of the surname part (handles multi-word surnames consistently on both sides).
+        head = a.split(",", 1)[0] if "," in a else a
+        parts = normalize_surname(head).split()
         if parts:
             out.add(parts[-1])
     return out

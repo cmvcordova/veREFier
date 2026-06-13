@@ -13,6 +13,28 @@ def test_normalize_surname_accent_folds():
     assert vr.normalize_surname("Böhm") == "bohm"
     assert vr.normalize_surname("van der Maaten") == "van der maaten"
 
+def test_surnames_bibtex_family_comma_given_order():
+    # BibTeX "Family, Given" -> surname is BEFORE the comma, not the last token
+    assert vr._surnames(["Bhaskar, Dhananjay"]) == {"bhaskar"}
+    assert vr._surnames(["Zelnik-Manor, Lihi"]) == {"manor"}
+    assert vr._surnames(["van der Maaten, Laurens"]) == {"maaten"}
+
+def test_surnames_given_family_order_unchanged():
+    # no comma -> last token (API family fields / "Given Family" lists)
+    assert vr._surnames(["Dhananjay Bhaskar"]) == {"bhaskar"}
+    assert vr._surnames(["Bhaskar"]) == {"bhaskar"}
+
+def test_author_overlap_across_comma_and_bare_family_formats():
+    # ref in BibTeX "Family, Given" must overlap a candidate's bare family names
+    ref_authors = ["Bhaskar, Dhananjay", "Krishnaswamy, Smita"]
+    cand_authors = ["Bhaskar", "Krishnaswamy"]
+    assert vr._author_overlap(ref_authors, cand_authors)
+
+def test_verdict_verified_with_bibtex_comma_authors():
+    ref = _ref(title="Diffusion maps", authors=["Coifman, Ronald R.", "Lafon, St\\'ephane"], year=2006)
+    cand = _cand(title="Diffusion maps", authors=["Coifman", "Lafon"], year=2006)
+    assert vr.verdict(ref, cand) == vr.VERIFIED
+
 def test_title_similarity_high_for_near_identical():
     a = "visualizing data using t sne"
     b = "visualizing data using t-sne"
