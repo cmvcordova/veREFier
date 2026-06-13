@@ -92,10 +92,38 @@ def _year_ok(ry, cy) -> bool:
     return abs(int(ry) - int(cy)) <= 1
 
 
+# Words too common to discriminate one title from another. "not"/"no"/"non" are kept
+# significant on purpose — they flip meaning ("all" vs "not all").
+_STOP = {"a", "an", "the", "of", "for", "to", "in", "on", "and", "or", "with", "via",
+         "using", "from", "by", "as", "at", "is", "are", "be", "that", "this"}
+_TOKEN_FUZZ = 0.85   # two tokens count as the same word above this char-ratio (spelling variants)
+
+
+def _sig_tokens(s: str):
+    return [t for t in normalize_title(s).split() if t not in _STOP]
+
+
+def _titles_agree(a: str, b: str) -> bool:
+    """Char-ratio >= TITLE_THRESHOLD is necessary but NOT sufficient: it rewards shared
+    boilerplate, so a single swapped *significant* word (t-SNE/UMAP, GPT-3/GPT-4, all/not-all,
+    method-for-X/Y) still scores 0.92-0.98. Additionally require every significant word on
+    EACH side to have a (fuzzy) partner on the other — a swapped/added content word then has
+    no partner and the titles disagree. Fuzzy token matching keeps spelling variants
+    (visualising/visualizing) agreeing. This matters most on the stated-DOI path: without it a
+    DOI pointing at the wrong paper would VERIFY and its metadata would overwrite the ref's."""
+    if title_similarity(a, b) < TITLE_THRESHOLD:
+        return False
+    ta, tb = _sig_tokens(a), _sig_tokens(b)
+    if not ta or not tb:
+        return True   # nothing beyond the char ratio to compare (e.g. all-stopword title)
+    covered = lambda xs, ys: all(any(title_similarity(x, y) >= _TOKEN_FUZZ for y in ys) for x in xs)
+    return covered(ta, tb) and covered(tb, ta)
+
+
 def verdict(ref: Ref, cand: Optional[Candidate]) -> str:
     if cand is None:
         return NOT_FOUND
-    title_ok = title_similarity(ref.title, cand.title) >= TITLE_THRESHOLD
+    title_ok = _titles_agree(ref.title, cand.title)
     author_ok = (not ref.authors) or _author_overlap(ref.authors, cand.authors)
     if title_ok and author_ok and _year_ok(ref.year, cand.year):
         return VERIFIED

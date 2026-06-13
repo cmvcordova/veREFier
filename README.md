@@ -51,8 +51,18 @@ identifier is authoritative and is checked *first* — so a wrong DOI is caught,
         └──────────────────────────────────────────────────────────────────┘
 ```
 
-Only `VERIFIED` rows are emitted to `--out-bib`. `--report` lists every verdict, and the process
-exits non-zero if any reference is not `VERIFIED` (usable as a CI / pre-commit gate).
+Only `VERIFIED` rows are emitted to `--out-bib`, **with the authority's canonical title / authors /
+year** — not the bibliography's original fields. The point of resolving the DOI is to take whatever
+the API returns post-match; the title gate exists so a DOI pointing at the *wrong* paper is rejected
+rather than silently overwriting your entry with that wrong paper's metadata. `--report` lists every
+verdict, and the process exits non-zero if any reference is not `VERIFIED` (usable as a CI /
+pre-commit gate).
+
+The title gate is deliberately stricter than a raw string ratio: it requires char-similarity ≥ 0.90
+*and* that every significant word on each side has a (fuzzy) partner on the other. A high char-ratio
+alone rewards shared boilerplate, so a single swapped word (`t-SNE`↔`UMAP`, `GPT-3`↔`GPT-4`,
+`all`↔`not all`) still scores 0.92–0.98; the per-word check rejects those while fuzzy matching keeps
+spelling variants (`visualising`/`visualizing`) and reordered subtitles agreeing.
 
 **Verification strength** is labelled per row: `doi` (strongest) > `arxiv` > `url` (weakest). A
 `url` tier means an authority asserted the work has no DOI and we emitted its stable landing URL —

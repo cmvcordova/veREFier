@@ -35,6 +35,31 @@ def test_verdict_verified_with_bibtex_comma_authors():
     cand = _cand(title="Diffusion maps", authors=["Coifman", "Lafon"], year=2006)
     assert vr.verdict(ref, cand) == vr.VERIFIED
 
+def test_titles_agree_rejects_single_significant_word_swap():
+    # char-ratio alone scores these 0.92-0.98; the token guard must reject them
+    assert not vr._titles_agree("The art of using t-SNE for single-cell transcriptomics",
+                                "The art of using UMAP for single-cell transcriptomics")
+    assert not vr._titles_agree("GPT-3: Language Models are Few-Shot Learners",
+                                "GPT-4: Language Models are Few-Shot Learners")
+    assert not vr._titles_agree("Attention is all you need", "Attention is not all you need")
+    assert not vr._titles_agree("A statistical method for X", "A statistical method for Y")
+
+def test_titles_agree_keeps_legit_variants():
+    assert vr._titles_agree("Visualising data using t-SNE", "Visualizing data using t-SNE")  # spelling
+    assert vr._titles_agree("{SCANPY}: Large-Scale Single-Cell Gene Expression Data Analysis",
+                            "SCANPY: large-scale single-cell gene expression data analysis")  # latex/case
+    assert vr._titles_agree(  # reordered subtitle, same words
+        "scDEED: a statistical method for detecting dubious 2D embeddings",
+        "Statistical method scDEED for detecting dubious 2D embeddings")
+
+def test_verdict_mismatch_on_swapped_method_name_even_with_author_year():
+    # the dangerous case: same author + same year, one decisive word differs -> must MISMATCH
+    ref = _ref(title="The art of using t-SNE for single-cell transcriptomics",
+               authors=["Kobak", "Berens"], year=2019)
+    cand = _cand(title="The art of using UMAP for single-cell transcriptomics",
+                 authors=["Kobak", "Berens"], year=2019)
+    assert vr.verdict(ref, cand) == vr.MISMATCH
+
 def test_title_similarity_high_for_near_identical():
     a = "visualizing data using t sne"
     b = "visualizing data using t-sne"
