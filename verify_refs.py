@@ -9,6 +9,7 @@ import re
 import unicodedata
 from difflib import SequenceMatcher
 
+_HTML = re.compile(r"<[^>]+>")
 _LATEX = re.compile(r"\\[a-zA-Z]+|[{}$]")
 _NONWORD = re.compile(r"[^a-z0-9 ]+")
 _WS = re.compile(r"\s+")
@@ -20,6 +21,9 @@ def _fold_accents(s: str) -> str:
 
 
 def normalize_title(s: str) -> str:
+    # Strip HTML markup FIRST (OpenAlex display names carry <i>/<sub>/...): otherwise the
+    # tag letters fall through as stray significant tokens and break the title gate.
+    s = _HTML.sub(" ", s)
     s = _LATEX.sub(" ", s)
     s = _fold_accents(s).lower()
     s = _NONWORD.sub(" ", s)
@@ -460,7 +464,7 @@ def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
         ident = landing or (oa if oa.startswith("http") else (f"https://openalex.org/{oa}" if oa else ""))
     if not ident:
         return None
-    return Candidate(title=it.get("display_name", ""), authors=authors,
+    return Candidate(title=_HTML.sub("", it.get("display_name", "") or ""), authors=authors,
                      year=it.get("publication_year"),
                      identifier_type=ident_type, identifier=ident, source="openalex")
 

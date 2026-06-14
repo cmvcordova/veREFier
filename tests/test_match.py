@@ -9,6 +9,22 @@ def test_normalize_title_strips_latex_and_punctuation():
     assert vr.normalize_title(r"{UMAP}: Uniform \emph{Manifold} Approximation!") == \
         "umap uniform manifold approximation"
 
+def test_normalize_title_strips_html_markup():
+    # OpenAlex display names carry HTML markup (<i>...</i>, <sub>...</sub>); the stray
+    # tag letters must not survive as significant tokens and break the title gate.
+    assert vr.normalize_title("<i>Pythia</i>: A Suite for Analyzing Models") == \
+        "pythia a suite for analyzing models"
+
+def test_resolve_openalex_strips_html_from_emitted_title():
+    js = ('{"results":[{"display_name":"<i>Pythia</i>: A Suite for Analyzing Large Language Models",'
+          '"publication_year":2023,"doi":null,"primary_location":{"landing_page_url":"https://x/p"},'
+          '"authorships":[{"author":{"display_name":"Stella Biderman"}}],"ids":{"openalex":"https://openalex.org/W1"}}]}')
+    ref = vr.Ref(key="pythia", raw="", title="Pythia: A Suite for Analyzing Large Language Models",
+                 authors=["Biderman"], year=2023)
+    cand = vr.resolve_openalex(ref, fetch=lambda u, headers=None: js)
+    assert "<i>" not in cand.title and cand.title.startswith("Pythia")
+    assert vr.verdict(ref, cand) == vr.VERIFIED
+
 def test_normalize_surname_accent_folds():
     assert vr.normalize_surname("Böhm") == "bohm"
     assert vr.normalize_surname("van der Maaten") == "van der maaten"
