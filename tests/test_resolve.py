@@ -60,6 +60,27 @@ def test_resolve_openalex_no_doi_returns_landing_url():
     assert cand.identifier_type == "url"
     assert cand.identifier == "https://www.jmlr.org/papers/v9/vandermaaten08a.html"
 
+def test_resolve_openalex_queries_title_filter_first():
+    # OpenAlex full-text `search=` ranks derivative/citing works above the paper itself,
+    # so it can miss the real record; the title.search filter matches the title field.
+    seen = []
+    def fetch(url, headers=None):
+        seen.append(url)
+        return (FIX / "openalex_pythia.json").read_text()
+    vr.resolve_openalex(vr.Ref(key="pythia", raw="", title="Pythia A Suite", year=2023), fetch=fetch)
+    assert "filter=title.search:" in seen[0]
+
+def test_resolve_openalex_falls_back_to_fulltext_when_title_filter_empty():
+    seen = []
+    def fetch(url, headers=None):
+        seen.append(url)
+        if "filter=title.search:" in url:
+            return '{"results":[]}'
+        return (FIX / "openalex_pythia.json").read_text()
+    cand = vr.resolve_openalex(vr.Ref(key="pythia", raw="", title="Pythia A Suite for Analyzing Large Language Models", year=2023), fetch=fetch)
+    assert cand is not None and cand.year == 2023
+    assert len(seen) == 2 and "search=" in seen[1] and "filter=title.search:" not in seen[1]
+
 def test_resolve_cascade_prefers_crossref(monkeypatch):
     ref = vr.Ref(key="tsne", raw="", title="Visualizing Data using t-SNE",
                  authors=["van der Maaten"], year=2008)

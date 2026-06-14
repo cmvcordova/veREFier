@@ -424,13 +424,26 @@ def resolve_doi_by_id(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
                      identifier_type="doi", identifier=doi, source="crossref")
 
 
-def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+def _openalex_results(ref: Ref, fetch, title_filter: bool):
     q = urllib.parse.quote(ref.title or ref.raw)
-    url = f"https://api.openalex.org/works?search={q}&per-page=5"
+    sel = f"filter=title.search:{q}" if title_filter else f"search={q}"
+    url = f"https://api.openalex.org/works?{sel}&per-page=5"
     try:
-        results = json.loads(fetch(url)).get("results", [])
+        return json.loads(fetch(url)).get("results", [])
     except Exception:
         return None
+
+
+def resolve_openalex(ref: Ref, fetch=_http_get) -> Optional[Candidate]:
+    # Title-filtered search FIRST: OpenAlex's full-text `search=` ranks derivative and
+    # citing works above the paper itself (a "Note on ... Pythia" outranks the Pythia paper),
+    # so the real record can fall outside the top results and never be considered. The
+    # `filter=title.search:` query matches the title field and surfaces the actual paper.
+    # Fall back to full-text search only when the title filter finds nothing (handles
+    # partial or inexact titles). This closes the arXiv-heavy-ML-paper coverage gap.
+    results = _openalex_results(ref, fetch, title_filter=True)
+    if not results:
+        results = _openalex_results(ref, fetch, title_filter=False)
     if not results:
         return None
     it = max(results, key=lambda x: title_similarity(ref.title, x.get("display_name", "") or ""))
