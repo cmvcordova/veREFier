@@ -508,6 +508,7 @@ def check_ref(ref: Ref, resolver=None) -> dict:
     v = verdict(ref, cand)
     return {
         "key": ref.key, "claimed_title": ref.title, "verdict": v,
+        "has_identifier": bool(ref.doi or ref.arxiv),
         "identifier_type": cand.identifier_type if cand else None,
         "strength": strength_of(cand.identifier_type) if cand else 0,
         "identifier": cand.identifier if cand else None,
@@ -536,21 +537,32 @@ def emit_bib(results) -> str:
 
 def emit_report(results) -> str:
     lines = ["# Reference verification report", ""]
-    n = {VERIFIED: 0, MISMATCH: 0, NOT_FOUND: 0}
+    n = {VERIFIED: 0, MISMATCH: 0, NOT_FOUND: 0, "GREY_LIT": 0}
     tiers = {"doi": 0, "arxiv": 0, "url": 0}
     for r in results:
-        n[r["verdict"]] += 1
-        tier = (r.get("identifier_type") if r["verdict"] == VERIFIED else None)
+        v = r["verdict"]
+        # Entries with no doi/arxiv field (URL-only, @misc, @manual, software,
+        # grey literature) cannot be meaningfully verified against academic
+        # databases.  Any non-VERIFIED result for such an entry is expected and
+        # does not indicate an error — report it as GREY_LIT instead.
+        grey = (v != VERIFIED and not r.get("has_identifier"))
+        if grey:
+            n["GREY_LIT"] += 1
+        else:
+            n[v] += 1
+        tier = (r.get("identifier_type") if v == VERIFIED else None)
         if tier in tiers:
             tiers[tier] += 1
         tag = f" [{tier}]" if tier else ""
         tail = (f" -> {r.get('source')}:{r.get('identifier')}" if r.get("identifier") else "")
         warn = (f"  [claimed vs matched: \"{r.get('claimed_title','')}\" / "
-                f"\"{r.get('matched_title','')}\"]" if r["verdict"] == MISMATCH else "")
-        lines.append(f"- `{r.get('key')}` **{r['verdict']}**{tag}{tail}{warn}")
+                f"\"{r.get('matched_title','')}\"]" if v == MISMATCH and not grey else "")
+        label = "GREY_LIT (url-only)" if grey else v
+        lines.append(f"- `{r.get('key')}` **{label}**{tag}{tail}{warn}")
     lines += ["", (f"VERIFIED {n[VERIFIED]} "
                    f"(doi {tiers['doi']} / arxiv {tiers['arxiv']} / url {tiers['url']}) | "
-                   f"MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]}")]
+                   f"MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]} | "
+                   f"GREY_LIT {n['GREY_LIT']}")]
     return "\n".join(lines)
 
 
