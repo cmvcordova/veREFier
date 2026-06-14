@@ -480,11 +480,22 @@ def resolve(ref: Ref, fetch_crossref=_http_get, fetch_arxiv=_http_get,
         cand = fn(ref, fetch=fetch)
         if cand is not None and verdict(ref, cand) == VERIFIED:
             return cand
-    # return the best non-verified candidate (Crossref first) for MISMATCH reporting
+    # Return the best-similarity non-verified candidate for MISMATCH reporting,
+    # but only when it is similar enough to be meaningful (>= _MISMATCH_MIN_SIM).
+    # A low-similarity result means the title search found something unrelated —
+    # common for grey literature, @misc/URL-only entries, or unusual titles.
+    # Those should surface as NOT_FOUND, not MISMATCH.  The stated-identifier
+    # paths above already handle genuine wrong-DOI/wrong-arXiv cases.
+    _MISMATCH_MIN_SIM = 0.60
+    best_cand, best_sim = None, 0.0
     for fn, fetch in chain:
         cand = fn(ref, fetch=fetch)
         if cand is not None:
-            return cand
+            sim = title_similarity(ref.title, cand.title)
+            if sim > best_sim:
+                best_sim, best_cand = sim, cand
+    if best_cand is not None and best_sim >= _MISMATCH_MIN_SIM:
+        return best_cand
     return None
 
 import argparse
