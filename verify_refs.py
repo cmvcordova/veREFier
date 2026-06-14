@@ -309,15 +309,22 @@ def parse(text: str, fmt: Optional[str] = None) -> List[Ref]:
     return {"bib": parse_bib, "bibitem": parse_bibitems, "list": parse_list}[fmt](text)
 
 import json
+import ssl
 import urllib.parse
 import urllib.request
 
 USER_AGENT = "veREFier/1.0 (mailto:anonymous@example.com)"
 
+try:
+    import certifi as _certifi
+    _SSL_CTX = ssl.create_default_context(cafile=_certifi.where())
+except ImportError:
+    _SSL_CTX = ssl.create_default_context()
+
 
 def _http_get(url: str, headers: Optional[dict] = None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
         return r.read().decode("utf-8", "replace")
 
 
