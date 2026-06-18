@@ -313,15 +313,22 @@ def parse(text: str, fmt: Optional[str] = None) -> List[Ref]:
     return {"bib": parse_bib, "bibitem": parse_bibitems, "list": parse_list}[fmt](text)
 
 import json
+import ssl
 import urllib.parse
 import urllib.request
 
 USER_AGENT = "veREFier/1.0 (mailto:anonymous@example.com)"
 
+try:
+    import certifi as _certifi
+    _SSL_CTX = ssl.create_default_context(cafile=_certifi.where())
+except ImportError:
+    _SSL_CTX = ssl.create_default_context()
+
 
 def _http_get(url: str, headers: Optional[dict] = None) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, **(headers or {})})
-    with urllib.request.urlopen(req, timeout=20) as r:
+    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
         return r.read().decode("utf-8", "replace")
 
 
@@ -490,11 +497,22 @@ def resolve(ref: Ref, fetch_crossref=_http_get, fetch_arxiv=_http_get,
         cand = fn(ref, fetch=fetch)
         if cand is not None and verdict(ref, cand) == VERIFIED:
             return cand
-    # return the best non-verified candidate (Crossref first) for MISMATCH reporting
+    # Return the best-similarity non-verified candidate for MISMATCH reporting,
+    # but only when it is similar enough to be meaningful (>= _MISMATCH_MIN_SIM).
+    # A low-similarity result means the title search found something unrelated —
+    # common for grey literature, @misc/URL-only entries, or unusual titles.
+    # Those should surface as NOT_FOUND, not MISMATCH.  The stated-identifier
+    # paths above already handle genuine wrong-DOI/wrong-arXiv cases.
+    _MISMATCH_MIN_SIM = 0.60
+    best_cand, best_sim = None, 0.0
     for fn, fetch in chain:
         cand = fn(ref, fetch=fetch)
         if cand is not None:
-            return cand
+            sim = title_similarity(ref.title, cand.title)
+            if sim > best_sim:
+                best_sim, best_cand = sim, cand
+    if best_cand is not None and best_sim >= _MISMATCH_MIN_SIM:
+        return best_cand
     return None
 
 import argparse
@@ -507,6 +525,7 @@ def check_ref(ref: Ref, resolver=None) -> dict:
     v = verdict(ref, cand)
     return {
         "key": ref.key, "claimed_title": ref.title, "verdict": v,
+        "has_identifier": bool(ref.doi or ref.arxiv),
         "identifier_type": cand.identifier_type if cand else None,
         "strength": strength_of(cand.identifier_type) if cand else 0,
         "identifier": cand.identifier if cand else None,
@@ -535,21 +554,32 @@ def emit_bib(results) -> str:
 
 def emit_report(results) -> str:
     lines = ["# Reference verification report", ""]
-    n = {VERIFIED: 0, MISMATCH: 0, NOT_FOUND: 0}
+    n = {VERIFIED: 0, MISMATCH: 0, NOT_FOUND: 0, "GREY_LIT": 0}
     tiers = {"doi": 0, "arxiv": 0, "url": 0}
     for r in results:
-        n[r["verdict"]] += 1
-        tier = (r.get("identifier_type") if r["verdict"] == VERIFIED else None)
+        v = r["verdict"]
+        # Entries with no doi/arxiv field (URL-only, @misc, @manual, software,
+        # grey literature) cannot be meaningfully verified against academic
+        # databases.  Any non-VERIFIED result for such an entry is expected and
+        # does not indicate an error — report it as GREY_LIT instead.
+        grey = (v != VERIFIED and not r.get("has_identifier"))
+        if grey:
+            n["GREY_LIT"] += 1
+        else:
+            n[v] += 1
+        tier = (r.get("identifier_type") if v == VERIFIED else None)
         if tier in tiers:
             tiers[tier] += 1
         tag = f" [{tier}]" if tier else ""
         tail = (f" -> {r.get('source')}:{r.get('identifier')}" if r.get("identifier") else "")
         warn = (f"  [claimed vs matched: \"{r.get('claimed_title','')}\" / "
-                f"\"{r.get('matched_title','')}\"]" if r["verdict"] == MISMATCH else "")
-        lines.append(f"- `{r.get('key')}` **{r['verdict']}**{tag}{tail}{warn}")
+                f"\"{r.get('matched_title','')}\"]" if v == MISMATCH and not grey else "")
+        label = "GREY_LIT (url-only)" if grey else v
+        lines.append(f"- `{r.get('key')}` **{label}**{tag}{tail}{warn}")
     lines += ["", (f"VERIFIED {n[VERIFIED]} "
                    f"(doi {tiers['doi']} / arxiv {tiers['arxiv']} / url {tiers['url']}) | "
-                   f"MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]}")]
+                   f"MISMATCH {n[MISMATCH]} | NOT_FOUND {n[NOT_FOUND]} | "
+                   f"GREY_LIT {n['GREY_LIT']}")]
     return "\n".join(lines)
 
 
